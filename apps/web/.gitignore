@@ -41,7 +41,7 @@ manifest.json
 output.json
 build.log
 
-# local data caches
-apps/web/.data/
-data/
+# local data caches (relative to apps/web/)
+.data/
+
 
