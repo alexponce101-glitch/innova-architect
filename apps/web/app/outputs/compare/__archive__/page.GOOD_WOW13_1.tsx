@@ -25,11 +25,11 @@ import { pulseFocus } from "../../../src/lib/ui/pulseFocus";
 import { flashNeutral } from "../../../src/lib/ui/flashNeutral";
 import { flashAccent } from "../../../src/lib/ui/flashAccent";
 
+import AutoPinsCard from "./AutoPinsCard";
 import { deriveExplainableAutoPins } from "../../../src/server/ai-outputs/compare/explainableAutoPins";
 
 import {
   buildUnifiedFromEngineOnly,
-  groupByZone,
   type RecommendationItem,
 } from "./recommendations/unified";
 
@@ -1440,40 +1440,6 @@ export default function OutputsComparePage() {
   const [data, setData] = React.useState<CompareResult | null>(null);
   const [explain, setExplain] = React.useState<any | null>(null);
 
-  // ✅ WOW #14.2: Unified zones collapsed state (persisted)
-  const unifiedZonesStorageKey = React.useMemo(() => {
-    // Scope por compare pair + mode/view (evita que se mezclen estados)
-    return `ia.unifiedZonesCollapsed.v1:a=${a}|b=${b}|mode=${mode}|view=${view}`;
-  }, [a, b, mode, view]);
-
-  const [collapsedUnifiedZones, setCollapsedUnifiedZones] = React.useState<
-    Record<string, boolean>
-  >({});
-
-  React.useEffect(() => {
-    try {
-      const raw = localStorage.getItem(unifiedZonesStorageKey);
-      setCollapsedUnifiedZones(raw ? JSON.parse(raw) : {});
-    } catch {
-      setCollapsedUnifiedZones({});
-    }
-  }, [unifiedZonesStorageKey]);
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem(
-        unifiedZonesStorageKey,
-        JSON.stringify(collapsedUnifiedZones),
-      );
-    } catch {
-      // no-op
-    }
-  }, [collapsedUnifiedZones, unifiedZonesStorageKey]);
-
-  const toggleUnifiedZone = React.useCallback((zone: string) => {
-    setCollapsedUnifiedZones((prev) => ({ ...prev, [zone]: !prev[zone] }));
-  }, []);
-
   // ✨ WOW #3 (flagship extra): micro-toast + guided focus tour
 
   const recTourRef = React.useRef<{ runId: number; timer?: number }>({
@@ -2068,56 +2034,17 @@ export default function OutputsComparePage() {
   const recommendedReason = recommended?.reasons?.[0];
 
   const unifiedRecs = React.useMemo(() => {
-    const out = buildUnifiedFromEngineOnly({
-      enginePins: [], // 👉 no tenemos RecommendedPin[] aquí
+    return buildUnifiedFromEngineOnly({
+      enginePins: [], // 👈 no tenemos RecommendedPin[] aquí
       uiAutoPins: {
         recommendedPins: recommendedPinsRaw ?? [],
         reasons: recommendedReason ? [recommendedReason] : undefined,
       },
     });
-
-    // ✅ WOW #14.1: ranking real (engineScore > zoneShare > hotspotWeight)
-    const items = Array.isArray(out?.items) ? [...out.items] : [];
-    items.sort((a: any, b: any) => {
-      const aEngine = typeof a.engineScore === "number" ? a.engineScore : 0;
-      const bEngine = typeof b.engineScore === "number" ? b.engineScore : 0;
-      if (bEngine !== aEngine) return bEngine - aEngine;
-
-      const aZone = typeof a.zoneShare === "number" ? a.zoneShare : 0;
-      const bZone = typeof b.zoneShare === "number" ? b.zoneShare : 0;
-      if (bZone !== aZone) return bZone - aZone;
-
-      const aHot = typeof a.hotspotWeight === "number" ? a.hotspotWeight : 0;
-      const bHot = typeof b.hotspotWeight === "number" ? b.hotspotWeight : 0;
-      if (bHot !== aHot) return bHot - aHot;
-
-      const aid = String(a.id ?? "");
-      const bid = String(b.id ?? "");
-      if (aid && bid && aid !== bid) return aid.localeCompare(bid);
-
-      const ap = String(a.pinPath ?? "");
-      const bp = String(b.pinPath ?? "");
-      return ap.localeCompare(bp);
-    });
-
-    return { ...out, items };
   }, [recommendedPinsRaw, recommendedReason]);
 
-  const unifiedSignalsN = unifiedRecs?.items?.length ?? 0;
-
-  const unifiedZonesN = React.useMemo(() => {
-    const items = unifiedRecs?.items ?? [];
-    if (!items.length) return 0;
-
-    const zones = new Set<string>();
-    for (const it of items as RecommendationItem[]) {
-      zones.add(String(it.zone ?? "other"));
-    }
-    return zones.size;
-  }, [unifiedRecs]);
-
   // ✅ Solo cuenta recomendaciones "nuevas" (unified) que aún no están pinned
-  const recommendedNTotalUnified = unifiedRecs?.items?.length ?? 0;
+  const recommendedNTotalUnified = unifiedRecs.recommended.length;
 
   const recommendedNNew = React.useMemo(() => {
     const recs = unifiedRecs?.recommended ?? [];
@@ -2450,10 +2377,6 @@ export default function OutputsComparePage() {
     if (pinned.isPinned(rowId)) return false; // already pinned
     pinned.togglePin({ path: normalizePath(path), tone: tone as DiffTone });
     return true; // newly pinned
-  }
-
-  function num(v: unknown, fallback = 0) {
-    return typeof v === "number" && Number.isFinite(v) ? v : fallback;
   }
 
   // ✨ WOW #3: micro-toast helper (auto-hide)
@@ -3622,619 +3545,491 @@ export default function OutputsComparePage() {
           <SmartPresetsPanel presets={presets} onApplyPreset={applyPreset} />
         ) : null}
 
-        {/* ✅ WOW #14: Unified Recommendation Engine */}
-        {data ? (
+        {autoPins ? (
+          <AutoPinsCard
+            autoPins={autoPins}
+            isPinned={pinned.isPinned}
+            makeRowId={pinned.makeRowId}
+            togglePin={pinned.togglePin}
+            excludePaths={suggestedPathsSet}
+            normalizePath={normalizePath}
+          />
+        ) : null}
+
+        {data && suggestedPins.length ? (
           <div className="border border-neutral-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="font-semibold">✨ Suggested Pins</div>
                 <div className="text-xs text-neutral-500">
-                  Recomendaciones unificadas (heuristics + hotspots),
-                  explicables, no-ML.
+                  Recomendaciones determinísticas basadas en CompareResult
+                  (explicables, no-ML).
                 </div>
               </div>
 
-              {(unifiedRecs?.items?.length ?? 0) > 0 ? (
-                <button
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg border text-sm flex items-center gap-2",
-                    recommendedNNew > 0
-                      ? "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
-                      : "border-neutral-300 bg-white text-neutral-500",
-                  )}
-                  onClick={applyRecommendedPins}
-                  disabled={recommendedNNew === 0}
-                  title={
-                    recommendedNNew === 0
-                      ? "No new recommended pins (try unpinning something recommended)"
-                      : (recommendedReason ?? "Pin all recommended")
-                  }
-                >
-                  <span>✨ Pin Recommended ({recommendedNTotalUnified})</span>
-                  <span className="text-[11px] opacity-80">
-                    (new {recommendedNNew})
-                  </span>
-                </button>
-              ) : (
-                <button
-                  className="px-3 py-1.5 rounded-lg border text-sm flex items-center gap-2 border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed"
-                  disabled
-                  title="No unified suggestions in this compare yet."
-                >
-                  <span>✨ Pin Recommended (0)</span>
-                  <span className="text-[11px] opacity-80">(new 0)</span>
-                </button>
-              )}
+              {/* ✅ WOW #10: usa Auto-Pin decision engine */}
+              <button
+                className={clsx(
+                  "px-3 py-1.5 rounded-lg border text-sm flex items-center gap-2",
+                  recommendedNNew > 0
+                    ? "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
+                    : "border-neutral-300 bg-white text-neutral-500",
+                )}
+                onClick={applyRecommendedPins}
+                disabled={recommendedNNew === 0}
+                title={
+                  recommendedNNew === 0
+                    ? "No new recommended pins (try unpinning something recommended)"
+                    : (recommendedReason ?? "Pin all recommended")
+                }
+              >
+                <span>✨ Pin Recommended ({recommendedNTotalUnified})</span>
+                <span className="text-[11px] opacity-80">
+                  (new {recommendedNNew})
+                </span>
+              </button>
             </div>
 
+            {/* ✅ WOW #10: chips clicables de cada recomendación */}
             {(unifiedRecs?.items?.length ?? 0) > 0 ? (
-              /* ✅ WOW #14.2: chips (dedupe already handled in unified.ts) + compactación por zona */
-              (() => {
-                const items = unifiedRecs.items as RecommendationItem[];
-
-                // UI-only grouping by zone
-                const byZone = groupByZone(items);
-
-                const zoneOrder: RecommendationItem["zone"][] = [
-                  "content",
-                  "output",
-                  "input",
-                  "model",
-                  "metadata",
-                  "other",
-                ];
-
-                // Render de 1 item (chip). Ultra-premium UX + Prefix-Pinned detection:
-                // - Click: focus exact
-                // - Shift+Click: smart pin (prefix si es profundo; si no, toggle pin exacto)
-                // - Alt+Click: copy path
-                // - Badges: kind, prefix, pinned (exact), pinned(prefix)
-                const renderRecItem = (it: RecommendationItem) => {
+              <div className="flex flex-wrap gap-2">
+                {unifiedRecs.items.map((it: RecommendationItem) => {
                   const p = normalizePath(it.pinPath);
-                  if (!p) return null;
+                  const isPrefix = p.endsWith(".*");
 
-                  const tone = bestToneForPath(p);
-                  const pinnedNow = isPinnedPath(p, tone);
-
-                  const depth = (p.match(/[.[\]]/g) ?? []).length;
-
-                  const isUnderPrefix = (prefix: string, path: string) => {
-                    if (!prefix) return false;
-                    if (path === prefix) return true;
-                    return (
-                      path.startsWith(prefix + ".") ||
-                      path.startsWith(prefix + "[")
-                    );
-                  };
-
-                  const smartPrefixForPin = (path: string) => {
-                    const lastDot = path.lastIndexOf(".");
-                    if (lastDot > 0) return path.slice(0, lastDot);
-
-                    const lastBracket = path.lastIndexOf("]");
-                    if (lastBracket > 0) return path.slice(0, lastBracket + 1);
-
-                    return null;
-                  };
-
-                  const smartPrefix = smartPrefixForPin(p);
-                  const willSmartPinPrefix = !!smartPrefix && depth >= 2;
-
-                  const prefixPinned =
-                    !!smartPrefix &&
-                    (pinned?.pins ?? []).some((pp: any) => {
-                      const rawPath = String(
-                        pp?.path ?? pp?.pinPath ?? pp?.p ?? "",
-                      );
-                      const ppPath = normalizePath(rawPath);
-                      if (!ppPath) return false;
-                      return isUnderPrefix(smartPrefix, ppPath);
-                    });
-
-                  const tooltip = [
-                    it.why?.title ?? "",
-                    ...(it.why?.details ?? []),
-                    `Tone: ${tone}${pinnedNow ? " • PINNED" : ""}${prefixPinned ? " • PREFIX PINNED" : ""}`,
-                    willSmartPinPrefix
-                      ? `Shift+Click: pin prefix → ${smartPrefix}`
-                      : "Shift+Click: toggle pin",
-                    "Click: focus • Alt+Click: copy",
-                  ]
-                    .filter(Boolean)
-                    .slice(0, 5)
-                    .join("\n");
-
-                  const doCopy = async () => {
-                    try {
-                      await navigator.clipboard.writeText(p);
-                      showToast?.(`Copied: ${p}`);
-                    } catch {
-                      // no-op
-                    }
-                  };
+                  const title =
+                    (it.why?.title ? it.why.title : "") +
+                    (it.why?.details?.length
+                      ? `\n• ${it.why.details.join("\n• ")}`
+                      : "") +
+                    (it.zone ? `\n[${it.zone}]` : "");
 
                   return (
                     <button
                       key={it.id}
                       type="button"
-                      className={clsx(
-                        "px-2.5 py-1.5 rounded-lg border text-xs bg-white flex items-center gap-2",
-                        "hover:bg-neutral-50 active:scale-[0.99] transition",
-                        pinnedNow
-                          ? "border-neutral-900 shadow-sm"
-                          : prefixPinned
-                            ? "border-neutral-500"
-                            : "border-neutral-200",
-                      )}
-                      title={tooltip}
-                      onClick={(e) => {
-                        if (e.altKey) {
-                          void doCopy();
+                      className="px-2 py-1 rounded-md border text-xs hover:bg-neutral-50 max-w-[320px] truncate"
+                      onClick={() => {
+                        if (isPrefix) {
+                          const root = p.slice(0, -2); // quita .*
+                          const pref =
+                            root === "<root>" ? "<root>" : `${root}.`;
+                          pinPrefix(pref);
+                          showToast?.(`📌 Pinned ${p}`);
                           return;
                         }
 
-                        setFocusPath(p);
-
-                        if (e.shiftKey) {
-                          if (willSmartPinPrefix && smartPrefix) {
-                            setFocusPath(smartPrefix);
-                            pinPrefix(
-                              smartPrefix.endsWith(".")
-                                ? smartPrefix
-                                : smartPrefix + ".",
-                            );
-                          } else {
-                            togglePinFor(p, tone);
-                          }
-                        }
+                        pinned.togglePin({ path: p, tone: "changed" });
+                        showToast?.(`📌 Pinned ${p}`);
                       }}
-                      onDoubleClick={() => {
-                        void doCopy();
-                      }}
+                      title={title || p}
                     >
-                      <span className="font-mono">{p}</span>
-
-                      <span
-                        className={clsx(
-                          "text-[10px] px-1.5 py-0.5 rounded border",
-                          it.kind === "engine"
-                            ? "border-neutral-900 text-neutral-900"
-                            : it.kind === "heuristic"
-                              ? "border-blue-400 text-blue-700"
-                              : "border-amber-400 text-amber-700",
-                        )}
-                      >
-                        {it.kind}
-                      </span>
-
-                      {willSmartPinPrefix ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-300 text-neutral-700">
-                          prefix
-                        </span>
-                      ) : null}
-
-                      {pinnedNow ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-900 text-neutral-900">
-                          pinned
-                        </span>
-                      ) : null}
-
-                      {!pinnedNow && prefixPinned ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-500 text-neutral-700">
-                          pinned+
-                        </span>
-                      ) : null}
+                      {p}
                     </button>
                   );
-                };
+                })}
+              </div>
+            ) : null}
 
-                return (
-                  <div className="space-y-3">
-                    {zoneOrder.map((z) => {
-                      const zoneItems = byZone.get(z) ?? [];
-                      if (!zoneItems.length) return null;
+            {/* 🔥 Hotspots (WOW #10) — debajo de Suggested Pins */}
+            <div style={{ marginTop: 8, padding: 8, border: "1px solid #ddd" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Hotspots</div>
 
-                      if (zoneItems.length === 1) {
-                        return (
-                          <div key={z} className="flex flex-wrap gap-2">
-                            {renderRecItem(zoneItems[0]!)}
-                          </div>
-                        );
-                      }
-
+              {zones.length === 0 ? (
+                <div style={{ opacity: 0.8 }}>
+                  No data yet. Pick valid a/b UUIDs to compute change hotspots.
+                </div>
+              ) : (
+                <>
+                  {/* Zone chips */}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                      marginBottom: 8,
+                    }}
+                  >
+                    {zones.map((z) => {
+                      const prefix = defaultPrefixForZone(z.zone);
                       return (
-                        <section
-                          key={z}
-                          className="rounded-xl border p-3 bg-neutral-50/40"
+                        <span
+                          key={z.zone}
+                          style={{
+                            display: "inline-flex",
+                            gap: 6,
+                            alignItems: "center",
+                          }}
                         >
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              className="text-[11px] font-semibold uppercase tracking-wide opacity-70 hover:opacity-100"
-                              onClick={() => toggleUnifiedZone(String(z))}
-                              title={
-                                collapsedUnifiedZones[String(z)]
-                                  ? "Expand zone"
-                                  : "Collapse zone"
-                              }
-                            >
-                              {z}
-                            </button>
-
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700">
-                                {zoneItems.length}
-                              </span>
-
-                              <button
-                                type="button"
-                                className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700 hover:bg-white"
-                                onClick={() => toggleUnifiedZone(String(z))}
-                              >
-                                {collapsedUnifiedZones[String(z)]
-                                  ? "Expand"
-                                  : "Collapse"}
-                              </button>
-                            </div>
-                          </div>
-
-                          {!collapsedUnifiedZones[String(z)] ? (
-                            <div className="flex flex-wrap gap-2">
-                              {zoneItems.map((it) => renderRecItem(it))}
-                            </div>
-                          ) : (
-                            <div className="text-xs text-neutral-500">
-                              Hidden ({zoneItems.length}) — click zone name to
-                              expand.
-                            </div>
-                          )}
-                        </section>
+                          <button
+                            type="button"
+                            onClick={() => prefix && setFocusPath(prefix)}
+                            style={{
+                              padding: "2px 8px",
+                              border: "1px solid #999",
+                              borderRadius: 999,
+                            }}
+                            title={
+                              prefix ? `Focus: ${prefix}` : "No default prefix"
+                            }
+                          >
+                            {z.zone} · {z.count}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => pinPrefix(prefix)}
+                            style={{
+                              padding: "2px 8px",
+                              border: "1px solid #999",
+                              borderRadius: 999,
+                            }}
+                            title={
+                              prefix ? `Pin: ${prefix}` : "No default prefix"
+                            }
+                          >
+                            Pin
+                          </button>
+                        </span>
                       );
                     })}
                   </div>
-                );
-              })()
-            ) : (
-              /* ✅ Empty state premium (cuando no hay diffs estructurales / no hay items) */
-              <div className="text-xs text-neutral-600">
-                <div className="font-medium">
-                  No unified suggestions for this compare.
-                </div>
-                <div className="text-neutral-500">
-                  Tip: prueba cambiar el Mode (payload/output) o usa un par A/B
-                  con cambios reales para ver chips accionables.
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
 
-        {/* ✅ WOW #14: Hotspots (premium, single source UI) */}
-        {(unifiedRecs?.items?.length ?? 0) > 0 ? null : zones.length ===
-          0 ? null : (
-          <div className="border border-neutral-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="font-semibold">✨ Suggested Pins</div>
-
-                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700">
-                    Signals: {unifiedRecs?.items?.length ?? 0}
-                  </span>
-
-                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700">
-                    Zones:{" "}
-                    {
-                      new Set(
-                        (unifiedRecs?.items ?? []).map(
-                          (it) => it.zone ?? "other",
-                        ),
-                      ).size
-                    }
-                  </span>
-                </div>
-
-                <div className="text-xs text-neutral-500">
-                  Recomendaciones unificadas (heuristics + hotspots),
-                  explicables, no-ML.
-                </div>
-              </div>
-
-              {(unifiedRecs?.items?.length ?? 0) > 0 ? (
-                <button
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg border text-sm flex items-center gap-2",
-                    recommendedNNew > 0
-                      ? "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
-                      : "border-neutral-300 bg-white text-neutral-500",
-                  )}
-                  onClick={applyRecommendedPins}
-                  disabled={recommendedNNew === 0}
-                  title={
-                    recommendedNNew === 0
-                      ? "No new recommended pins (try unpinning something recommended)"
-                      : (recommendedReason ?? "Pin all recommended")
-                  }
-                >
-                  <span>✨ Pin Recommended ({recommendedNTotalUnified})</span>
-                  <span className="text-[11px] opacity-80">
-                    (new {recommendedNNew})
-                  </span>
-                </button>
-              ) : (
-                <button
-                  className="px-3 py-1.5 rounded-lg border text-sm flex items-center gap-2 border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed"
-                  disabled
-                  title="No unified suggestions in this compare yet."
-                >
-                  <span>✨ Pin Recommended (0)</span>
-                  <span className="text-[11px] opacity-80">(new 0)</span>
-                </button>
+                  {/* Top prefix hotspots */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {hotspots.slice(0, 8).map((h) => (
+                      <span
+                        key={`${h.zone}::${h.pathPrefix}`}
+                        style={{
+                          display: "inline-flex",
+                          gap: 6,
+                          alignItems: "center",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setFocusPath(h.pathPrefix)}
+                          style={{
+                            padding: "2px 8px",
+                            border: "1px solid #999",
+                            borderRadius: 999,
+                          }}
+                          title={`Focus: ${h.pathPrefix}`}
+                        >
+                          {h.pathPrefix} · {h.count}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => pinPrefix(h.pathPrefix)}
+                          style={{
+                            padding: "2px 8px",
+                            border: "1px solid #999",
+                            borderRadius: 999,
+                          }}
+                          title={`Pin: ${h.pathPrefix}`}
+                        >
+                          Pin
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
 
-            {/* Zone chips */}
-            <div className="flex flex-wrap gap-2">
-              {zones.map((z) => {
-                const prefix = defaultPrefixForZone(z.zone);
-                const canAct = !!prefix;
-                return (
-                  <div key={z.zone} className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className={clsx(
-                        "px-3 py-1.5 rounded-full border text-xs",
-                        canAct
-                          ? "border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50"
-                          : "border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed",
-                      )}
-                      onClick={() => canAct && setFocusPath(prefix)}
-                      disabled={!canAct}
-                      title={canAct ? `Focus: ${prefix}` : "No default prefix"}
-                    >
-                      {z.zone} · {z.count}
-                    </button>
+            {/* 🔥 WOW #10 — Hotspots */}
+            <div className="border border-neutral-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="font-semibold">🔥 Hotspots</div>
+                  <div className="text-xs text-neutral-500">
+                    Cambios agrupados por zona y prefijo (click = focus, Pin =
+                    pin por prefijo)
+                  </div>
+                </div>
+              </div>
 
-                    <button
-                      type="button"
-                      className={clsx(
-                        "px-3 py-1.5 rounded-full border text-xs",
-                        canAct
-                          ? "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
-                          : "border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed",
-                      )}
-                      onClick={() => canAct && pinPrefix(prefix)}
-                      disabled={!canAct}
-                      title={canAct ? `Pin: ${prefix}` : "No default prefix"}
-                    >
-                      Pin
-                    </button>
+              {zones.length === 0 ? (
+                <div className="text-sm text-neutral-600">
+                  No data yet. Usa{" "}
+                  <span className="font-mono">
+                    ?a=&lt;uuid&gt;&amp;b=&lt;uuid&gt;
+                  </span>{" "}
+                  para ver hotspots.
+                </div>
+              ) : (
+                <>
+                  {/* Zone chips */}
+                  <div className="flex flex-wrap gap-2">
+                    {zones.map((z) => {
+                      const prefix = defaultPrefixForZone(z.zone);
+                      const canAct = !!prefix;
+                      return (
+                        <div key={z.zone} className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className={clsx(
+                              "px-3 py-1.5 rounded-full border text-xs",
+                              canAct
+                                ? "border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50"
+                                : "border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed",
+                            )}
+                            onClick={() => canAct && setFocusPath(prefix)}
+                            disabled={!canAct}
+                            title={
+                              canAct ? `Focus: ${prefix}` : "No default prefix"
+                            }
+                          >
+                            {z.zone} · {z.count}
+                          </button>
+
+                          <button
+                            type="button"
+                            className={clsx(
+                              "px-3 py-1.5 rounded-full border text-xs",
+                              canAct
+                                ? "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
+                                : "border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed",
+                            )}
+                            onClick={() => canAct && pinPrefix(prefix)}
+                            disabled={!canAct}
+                            title={
+                              canAct ? `Pin: ${prefix}` : "No default prefix"
+                            }
+                          >
+                            Pin
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Top hotspots */}
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {hotspots.slice(0, 10).map((h) => (
+                      <div
+                        key={`${h.zone}::${h.pathPrefix}`}
+                        className="flex items-center gap-2"
+                      >
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 rounded-full border border-neutral-300 bg-white text-xs hover:bg-neutral-50"
+                          onClick={() => setFocusPath(h.pathPrefix)}
+                          title={`Focus: ${h.pathPrefix}`}
+                        >
+                          {h.pathPrefix} · {h.count}
+                        </button>
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 rounded-full border border-neutral-900 bg-neutral-900 text-white text-xs hover:bg-neutral-800"
+                          onClick={() => pinPrefix(h.pathPrefix)}
+                          title={`Pin: ${h.pathPrefix}`}
+                        >
+                          Pin
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {tourOpen && tourPaths.length ? (
+              <div className="border border-neutral-200 rounded-lg p-3 bg-neutral-50 flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold">🧭 Guided Tour</div>
+                  <div className="text-xs text-neutral-600">
+                    item <span className="font-mono">{tourIndex + 1}</span> /{" "}
+                    <span className="font-mono">{tourPaths.length}</span> —{" "}
+                    <span className="font-mono break-words">
+                      {tourPaths[tourIndex]}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-neutral-500 mt-1">
+                    Hotkeys: <span className="font-mono">N</span>/
+                    <span className="font-mono">P</span> ·{" "}
+                    <span className="font-mono">Esc</span> to stop
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    className="text-xs px-2 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50"
+                    onClick={prevTour}
+                    disabled={tourIndex === 0}
+                    title="Prev (P)"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    className="text-xs px-2 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50"
+                    onClick={nextTour}
+                    disabled={tourIndex >= tourPaths.length - 1}
+                    title="Next (N)"
+                  >
+                    Next
+                  </button>
+                  <button
+                    className="text-xs px-2 py-1 rounded-lg border border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
+                    onClick={stopTour}
+                    title="Stop (Esc)"
+                  >
+                    Stop
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {/* ✅ ÚNICO grid correcto (sin duplicados / sin bloque corrupto) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {suggestedPins.slice(0, 10).map((r) => {
+                const np = normalizePath(r.path);
+                const tone = bestToneForPath(np);
+
+                const rowId = makeRowId(np, tone as DiffTone);
+                const already = pinned.isPinned(rowId);
+
+                const needsOutputSnap =
+                  np === "snapshots.aOutputJson" ||
+                  np === "snapshots.bOutputJson";
+                const needsPayloadSnap =
+                  np === "snapshots.aPayloadJson" ||
+                  np === "snapshots.bPayloadJson";
+
+                const disabled =
+                  (needsOutputSnap && !canViewOutput) ||
+                  (needsPayloadSnap && payloadSnapshotsMissing);
+
+                return (
+                  <div
+                    key={np}
+                    data-path={np}
+                    className="border border-neutral-200 rounded-lg p-3 bg-neutral-50"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs text-neutral-900 break-words">
+                          {np}
+                        </div>
+                        <div className="mt-1 text-xs text-neutral-700">
+                          {r.reason}
+                        </div>
+
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-white border-neutral-300 text-neutral-700">
+                            score: <span className="font-mono">{r.score}</span>
+                          </span>
+
+                          <span
+                            className={clsx(
+                              "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
+                              tone === "changed"
+                                ? "bg-yellow-50 border-yellow-200 text-yellow-900"
+                                : tone === "added"
+                                  ? "bg-green-50 border-green-200 text-green-900"
+                                  : "bg-red-50 border-red-200 text-red-900",
+                            )}
+                            title="Tone chosen for pin"
+                          >
+                            tone: {tone.toUpperCase()}
+                          </span>
+
+                          {already ? (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-neutral-900 text-white border-neutral-900">
+                              ALREADY PINNED
+                            </span>
+                          ) : null}
+
+                          {disabled ? (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-800 border-amber-200">
+                              SNAPSHOT MISSING
+                            </span>
+                          ) : null}
+
+                          {Array.isArray(r.tags) && r.tags.length ? (
+                            <span className="text-[10px] text-neutral-500">
+                              tags:{" "}
+                              <span className="font-mono">
+                                {r.tags.join(", ")}
+                              </span>
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          className="text-xs px-2 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50"
+                          onClick={() => focusFromChip(np)}
+                          title="Focus"
+                        >
+                          Focus
+                        </button>
+
+                        <button
+                          className={clsx(
+                            "text-xs px-2 py-1 rounded-lg border",
+                            already
+                              ? "border-neutral-300 bg-white text-neutral-400 cursor-not-allowed"
+                              : "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800",
+                          )}
+                          onClick={() => {
+                            if (disabled) return;
+                            if (already) return;
+                            ensurePinned(np, tone);
+                            showToast(`📌 Pinned: ${np}`);
+                          }}
+                          disabled={already || disabled}
+                          title={
+                            already
+                              ? "Already pinned"
+                              : disabled
+                                ? "Missing snapshots for this recommendation"
+                                : "Pin"
+                          }
+                        >
+                          📌 Pin
+                        </button>
+
+                        <button
+                          className={clsx(
+                            "text-xs px-2 py-1 rounded-lg border",
+                            disabled || already
+                              ? "border-neutral-300 bg-white text-neutral-400 cursor-not-allowed"
+                              : "border-neutral-900 bg-white text-neutral-900 hover:bg-neutral-50",
+                          )}
+                          onClick={() => {
+                            if (disabled) return;
+                            if (already) {
+                              focusFromChip(np);
+                              return;
+                            }
+                            ensurePinned(np, tone);
+                            focusFromChip(np);
+                          }}
+                          disabled={disabled}
+                          title={
+                            disabled
+                              ? "Missing snapshots for this recommendation"
+                              : already
+                                ? "Already pinned • Focus"
+                                : "Pin and focus"
+                          }
+                        >
+                          📌 Pin + Focus
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Top hotspots */}
-            <div className="flex flex-wrap gap-2 pt-2">
-              {hotspots.slice(0, 10).map((h) => (
-                <div
-                  key={`${h.zone}::${h.pathPrefix}`}
-                  className="flex items-center gap-2"
-                >
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 rounded-full border border-neutral-300 bg-white text-xs hover:bg-neutral-50"
-                    onClick={() => setFocusPath(h.pathPrefix)}
-                    title={`Focus: ${h.pathPrefix}`}
-                  >
-                    {h.pathPrefix} · {h.count}
-                  </button>
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 rounded-full border border-neutral-900 bg-neutral-900 text-white text-xs hover:bg-neutral-800"
-                    onClick={() => pinPrefix(h.pathPrefix)}
-                    title={`Pin: ${h.pathPrefix}`}
-                  >
-                    Pin
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tourOpen && tourPaths.length ? (
-          <div className="border border-neutral-200 rounded-lg p-3 bg-neutral-50 flex items-center justify-between gap-3 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold">🧭 Guided Tour</div>
-              <div className="text-xs text-neutral-600">
-                item <span className="font-mono">{tourIndex + 1}</span> /{" "}
-                <span className="font-mono">{tourPaths.length}</span> —{" "}
-                <span className="font-mono break-words">
-                  {tourPaths[tourIndex]}
-                </span>
+            {suggestedPins.length > 10 ? (
+              <div className="text-xs text-neutral-500">
+                Showing 10 /{" "}
+                <span className="font-mono">{suggestedPins.length}</span>
               </div>
-              <div className="text-[10px] text-neutral-500 mt-1">
-                Hotkeys: <span className="font-mono">N</span>/
-                <span className="font-mono">P</span> ·{" "}
-                <span className="font-mono">Esc</span> to stop
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                className="text-xs px-2 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50"
-                onClick={prevTour}
-                disabled={tourIndex === 0}
-                title="Prev (P)"
-              >
-                Prev
-              </button>
-              <button
-                className="text-xs px-2 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50"
-                onClick={nextTour}
-                disabled={tourIndex >= tourPaths.length - 1}
-                title="Next (N)"
-              >
-                Next
-              </button>
-              <button
-                className="text-xs px-2 py-1 rounded-lg border border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
-                onClick={stopTour}
-                title="Stop (Esc)"
-              >
-                Stop
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {/* ✅ ÚNICO grid correcto (sin duplicados / sin bloque corrupto) */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {suggestedPins.slice(0, 10).map((r) => {
-            const np = normalizePath(r.path);
-            const tone = bestToneForPath(np);
-
-            const rowId = makeRowId(np, tone as DiffTone);
-            const already = pinned.isPinned(rowId);
-
-            const needsOutputSnap =
-              np === "snapshots.aOutputJson" || np === "snapshots.bOutputJson";
-            const needsPayloadSnap =
-              np === "snapshots.aPayloadJson" ||
-              np === "snapshots.bPayloadJson";
-
-            const disabled =
-              (needsOutputSnap && !canViewOutput) ||
-              (needsPayloadSnap && payloadSnapshotsMissing);
-
-            return (
-              <div
-                key={np}
-                data-path={np}
-                className="border border-neutral-200 rounded-lg p-3 bg-neutral-50"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-mono text-xs text-neutral-900 break-words">
-                      {np}
-                    </div>
-                    <div className="mt-1 text-xs text-neutral-700">
-                      {r.reason}
-                    </div>
-
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-white border-neutral-300 text-neutral-700">
-                        score: <span className="font-mono">{r.score}</span>
-                      </span>
-
-                      <span
-                        className={clsx(
-                          "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
-                          tone === "changed"
-                            ? "bg-yellow-50 border-yellow-200 text-yellow-900"
-                            : tone === "added"
-                              ? "bg-green-50 border-green-200 text-green-900"
-                              : "bg-red-50 border-red-200 text-red-900",
-                        )}
-                        title="Tone chosen for pin"
-                      >
-                        tone: {tone.toUpperCase()}
-                      </span>
-
-                      {already ? (
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-neutral-900 text-white border-neutral-900">
-                          ALREADY PINNED
-                        </span>
-                      ) : null}
-
-                      {disabled ? (
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-800 border-amber-200">
-                          SNAPSHOT MISSING
-                        </span>
-                      ) : null}
-
-                      {Array.isArray(r.tags) && r.tags.length ? (
-                        <span className="text-[10px] text-neutral-500">
-                          tags:{" "}
-                          <span className="font-mono">{r.tags.join(", ")}</span>
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 shrink-0">
-                    <button
-                      className="text-xs px-2 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50"
-                      onClick={() => focusFromChip(np)}
-                      title="Focus"
-                    >
-                      Focus
-                    </button>
-
-                    <button
-                      className={clsx(
-                        "text-xs px-2 py-1 rounded-lg border",
-                        already
-                          ? "border-neutral-300 bg-white text-neutral-400 cursor-not-allowed"
-                          : "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800",
-                      )}
-                      onClick={() => {
-                        if (disabled) return;
-                        if (already) return;
-                        ensurePinned(np, tone);
-                        showToast(`📌 Pinned: ${np}`);
-                      }}
-                      disabled={already || disabled}
-                      title={
-                        already
-                          ? "Already pinned"
-                          : disabled
-                            ? "Missing snapshots for this recommendation"
-                            : "Pin"
-                      }
-                    >
-                      📌 Pin
-                    </button>
-
-                    <button
-                      className={clsx(
-                        "text-xs px-2 py-1 rounded-lg border",
-                        disabled || already
-                          ? "border-neutral-300 bg-white text-neutral-400 cursor-not-allowed"
-                          : "border-neutral-900 bg-white text-neutral-900 hover:bg-neutral-50",
-                      )}
-                      onClick={() => {
-                        if (disabled) return;
-                        if (already) {
-                          focusFromChip(np);
-                          return;
-                        }
-                        ensurePinned(np, tone);
-                        focusFromChip(np);
-                      }}
-                      disabled={disabled}
-                      title={
-                        disabled
-                          ? "Missing snapshots for this recommendation"
-                          : already
-                            ? "Already pinned • Focus"
-                            : "Pin and focus"
-                      }
-                    >
-                      📌 Pin + Focus
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {suggestedPins.length > 10 ? (
-          <div className="text-xs text-neutral-500">
-            Showing 10 /{" "}
-            <span className="font-mono">{suggestedPins.length}</span>
+            ) : null}
           </div>
         ) : null}
       </div>
