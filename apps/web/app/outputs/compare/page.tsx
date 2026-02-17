@@ -1448,16 +1448,14 @@ export default function OutputsComparePage() {
 
   const [collapsedUnifiedZones, setCollapsedUnifiedZones] = React.useState<
     Record<string, boolean>
-  >({});
-
-  React.useEffect(() => {
+  >(() => {
     try {
       const raw = localStorage.getItem(unifiedZonesStorageKey);
-      setCollapsedUnifiedZones(raw ? JSON.parse(raw) : {});
+      return raw ? JSON.parse(raw) : {};
     } catch {
-      setCollapsedUnifiedZones({});
+      return {};
     }
-  }, [unifiedZonesStorageKey]);
+  });
 
   React.useEffect(() => {
     try {
@@ -1471,7 +1469,29 @@ export default function OutputsComparePage() {
   }, [collapsedUnifiedZones, unifiedZonesStorageKey]);
 
   const toggleUnifiedZone = React.useCallback((zone: string) => {
-    setCollapsedUnifiedZones((prev) => ({ ...prev, [zone]: !prev[zone] }));
+    const k = String(zone);
+    setCollapsedUnifiedZones((prev) => ({ ...prev, [k]: !prev[k] }));
+  }, []);
+
+  const isZoneCollapsed = React.useCallback(
+    (zone: string) => !!collapsedUnifiedZones[String(zone)],
+    [collapsedUnifiedZones],
+  );
+
+  const collapseAllUnifiedZones = React.useCallback((zones: string[]) => {
+    setCollapsedUnifiedZones((prev) => {
+      const next = { ...prev };
+      for (const z of zones) next[String(z)] = true;
+      return next;
+    });
+  }, []);
+
+  const expandAllUnifiedZones = React.useCallback((zones: string[]) => {
+    setCollapsedUnifiedZones((prev) => {
+      const next = { ...prev };
+      for (const z of zones) next[String(z)] = false;
+      return next;
+    });
   }, []);
 
   // ✨ WOW #3 (flagship extra): micro-toast + guided focus tour
@@ -3621,13 +3641,30 @@ export default function OutputsComparePage() {
         {data && presets.length ? (
           <SmartPresetsPanel presets={presets} onApplyPreset={applyPreset} />
         ) : null}
-
         {/* ✅ WOW #14: Unified Recommendation Engine */}
         {data ? (
           <div className="border border-neutral-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <div className="font-semibold">✨ Suggested Pins</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="font-semibold">✨ Suggested Pins</div>
+
+                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700">
+                    Signals: {unifiedRecs?.items?.length ?? 0}
+                  </span>
+
+                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700">
+                    Zones:{" "}
+                    {
+                      new Set(
+                        (unifiedRecs?.items ?? []).map(
+                          (it) => it.zone ?? "other",
+                        ),
+                      ).size
+                    }
+                  </span>
+                </div>
+
                 <div className="text-xs text-neutral-500">
                   Recomendaciones unificadas (heuristics + hotspots),
                   explicables, no-ML.
@@ -3668,11 +3705,51 @@ export default function OutputsComparePage() {
             </div>
 
             {(unifiedRecs?.items?.length ?? 0) > 0 ? (
-              /* ✅ WOW #14.2: chips (dedupe already handled in unified.ts) + compactación por zona */
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-neutral-500">
+                  Zone density:
+                  <span className="ml-2 font-mono">
+                    {
+                      Object.values(collapsedUnifiedZones).filter(Boolean)
+                        .length
+                    }{" "}
+                    collapsed
+                  </span>
+                </div>
+
+                {(() => {
+                  const items = unifiedRecs?.items ?? [];
+                  const zones = Array.from(
+                    new Set(items.map((it) => String(it.zone ?? "other"))),
+                  );
+                  const collapsedCount = zones.filter((z) =>
+                    isZoneCollapsed(z),
+                  ).length;
+                  const allCollapsed =
+                    zones.length > 0 && collapsedCount === zones.length;
+
+                  return (
+                    <button
+                      type="button"
+                      className="text-xs px-2 py-1 rounded-md border border-neutral-200 hover:bg-neutral-50"
+                      onClick={() => {
+                        if (allCollapsed) expandAllUnifiedZones(zones);
+                        else collapseAllUnifiedZones(zones);
+                      }}
+                      title={
+                        allCollapsed ? "Expand all zones" : "Collapse all zones"
+                      }
+                    >
+                      {allCollapsed ? "Expand all" : "Collapse all"}
+                    </button>
+                  );
+                })()}
+              </div>
+            ) : null}
+
+            {(unifiedRecs?.items?.length ?? 0) > 0 ? (
               (() => {
                 const items = unifiedRecs.items as RecommendationItem[];
-
-                // UI-only grouping by zone
                 const byZone = groupByZone(items);
 
                 const zoneOrder: RecommendationItem["zone"][] = [
@@ -3684,11 +3761,23 @@ export default function OutputsComparePage() {
                   "other",
                 ];
 
-                // Render de 1 item (chip). Ultra-premium UX + Prefix-Pinned detection:
-                // - Click: focus exact
-                // - Shift+Click: smart pin (prefix si es profundo; si no, toggle pin exacto)
-                // - Alt+Click: copy path
-                // - Badges: kind, prefix, pinned (exact), pinned(prefix)
+                const isUnderPrefix = (prefix: string, path: string) => {
+                  if (!prefix) return false;
+                  if (path === prefix) return true;
+                  return (
+                    path.startsWith(prefix + ".") ||
+                    path.startsWith(prefix + "[")
+                  );
+                };
+
+                const smartPrefixForPin = (path: string) => {
+                  const lastDot = path.lastIndexOf(".");
+                  if (lastDot > 0) return path.slice(0, lastDot);
+                  const lastBracket = path.lastIndexOf("]");
+                  if (lastBracket > 0) return path.slice(0, lastBracket + 1);
+                  return null;
+                };
+
                 const renderRecItem = (it: RecommendationItem) => {
                   const p = normalizePath(it.pinPath);
                   if (!p) return null;
@@ -3697,26 +3786,6 @@ export default function OutputsComparePage() {
                   const pinnedNow = isPinnedPath(p, tone);
 
                   const depth = (p.match(/[.[\]]/g) ?? []).length;
-
-                  const isUnderPrefix = (prefix: string, path: string) => {
-                    if (!prefix) return false;
-                    if (path === prefix) return true;
-                    return (
-                      path.startsWith(prefix + ".") ||
-                      path.startsWith(prefix + "[")
-                    );
-                  };
-
-                  const smartPrefixForPin = (path: string) => {
-                    const lastDot = path.lastIndexOf(".");
-                    if (lastDot > 0) return path.slice(0, lastDot);
-
-                    const lastBracket = path.lastIndexOf("]");
-                    if (lastBracket > 0) return path.slice(0, lastBracket + 1);
-
-                    return null;
-                  };
-
                   const smartPrefix = smartPrefixForPin(p);
                   const willSmartPinPrefix = !!smartPrefix && depth >= 2;
 
@@ -3748,9 +3817,7 @@ export default function OutputsComparePage() {
                     try {
                       await navigator.clipboard.writeText(p);
                       showToast?.(`Copied: ${p}`);
-                    } catch {
-                      // no-op
-                    }
+                    } catch {}
                   };
 
                   return (
@@ -3788,9 +3855,7 @@ export default function OutputsComparePage() {
                           }
                         }
                       }}
-                      onDoubleClick={() => {
-                        void doCopy();
-                      }}
+                      onDoubleClick={() => void doCopy()}
                     >
                       <span className="font-mono">{p}</span>
 
@@ -3842,6 +3907,8 @@ export default function OutputsComparePage() {
                         );
                       }
 
+                      const collapsed = !!collapsedUnifiedZones[String(z)];
+
                       return (
                         <section
                           key={z}
@@ -3853,9 +3920,7 @@ export default function OutputsComparePage() {
                               className="text-[11px] font-semibold uppercase tracking-wide opacity-70 hover:opacity-100"
                               onClick={() => toggleUnifiedZone(String(z))}
                               title={
-                                collapsedUnifiedZones[String(z)]
-                                  ? "Expand zone"
-                                  : "Collapse zone"
+                                collapsed ? "Expand zone" : "Collapse zone"
                               }
                             >
                               {z}
@@ -3871,14 +3936,12 @@ export default function OutputsComparePage() {
                                 className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200 text-neutral-700 hover:bg-white"
                                 onClick={() => toggleUnifiedZone(String(z))}
                               >
-                                {collapsedUnifiedZones[String(z)]
-                                  ? "Expand"
-                                  : "Collapse"}
+                                {collapsed ? "Expand" : "Collapse"}
                               </button>
                             </div>
                           </div>
 
-                          {!collapsedUnifiedZones[String(z)] ? (
+                          {!collapsed ? (
                             <div className="flex flex-wrap gap-2">
                               {zoneItems.map((it) => renderRecItem(it))}
                             </div>
@@ -3895,7 +3958,6 @@ export default function OutputsComparePage() {
                 );
               })()
             ) : (
-              /* ✅ Empty state premium (cuando no hay diffs estructurales / no hay items) */
               <div className="text-xs text-neutral-600">
                 <div className="font-medium">
                   No unified suggestions for this compare.
@@ -3908,7 +3970,6 @@ export default function OutputsComparePage() {
             )}
           </div>
         ) : null}
-
         {/* ✅ WOW #14: Hotspots (premium, single source UI) */}
         {(unifiedRecs?.items?.length ?? 0) > 0 ? null : zones.length ===
           0 ? null : (
@@ -4042,7 +4103,6 @@ export default function OutputsComparePage() {
             </div>
           </div>
         )}
-
         {tourOpen && tourPaths.length ? (
           <div className="border border-neutral-200 rounded-lg p-3 bg-neutral-50 flex items-center justify-between gap-3 flex-wrap">
             <div className="min-w-0">
@@ -4088,7 +4148,6 @@ export default function OutputsComparePage() {
             </div>
           </div>
         ) : null}
-
         {/* ✅ ÚNICO grid correcto (sin duplicados / sin bloque corrupto) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {suggestedPins.slice(0, 10).map((r) => {
@@ -4230,13 +4289,13 @@ export default function OutputsComparePage() {
             );
           })}
         </div>
-
         {suggestedPins.length > 10 ? (
           <div className="text-xs text-neutral-500">
             Showing 10 /{" "}
             <span className="font-mono">{suggestedPins.length}</span>
           </div>
         ) : null}
+        /* ✅ END: Suggested Pins wrapper (space-y-3) */
       </div>
 
       {/* ✅ Micro-toast (WOW polish) */}

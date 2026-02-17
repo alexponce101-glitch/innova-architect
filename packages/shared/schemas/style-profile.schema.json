@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://innova-architect.local/schemas/style-profile.schema.json",
+  "title": "StyleProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "moodboardId",
+    "version",
+    "status",
+    "createdAt",
+    "updatedAt",
+    "primaryStyle",
+    "secondaryStyles",
+    "preferences",
+    "constraints",
+    "signalsSummary",
+    "userEdits"
+  ],
+  "properties": {
+    "id": { "type": "string", "minLength": 6, "maxLength": 128 },
+    "moodboardId": { "type": "string", "minLength": 6, "maxLength": 128 },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "status": { "type": "string", "enum": ["draft", "confirmed", "locked"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+
+    "primaryStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "confidence"],
+      "properties": {
+        "key": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "secondaryStyles": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "confidence"],
+        "properties": {
+          "key": { "type": "string", "minLength": 2, "maxLength": 64 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mood",
+        "materials",
+        "palette",
+        "geometry",
+        "ornamentation",
+        "lightPreference",
+        "spatialFeel",
+        "connectionToNature",
+        "visualNoiseTolerance",
+        "innovationLevel"
+      ],
+      "properties": {
+        "mood": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 2, "maxLength": 64 }
+        },
+        "materials": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 2, "maxLength": 64 }
+        },
+        "palette": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 2, "maxLength": 64 }
+        },
+        "geometry": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 6,
+          "items": { "type": "string", "minLength": 2, "maxLength": 64 }
+        },
+        "ornamentation": { "type": "string", "enum": ["none", "low", "medium", "high"] },
+        "lightPreference": {
+          "type": "string",
+          "enum": ["natural_abundant", "balanced", "dim_cozy"]
+        },
+        "spatialFeel": { "type": "string", "enum": ["open", "semi_open", "cozy_compact"] },
+        "connectionToNature": { "type": "boolean" },
+        "visualNoiseTolerance": { "type": "string", "enum": ["very_low", "low", "medium", "high"] },
+        "innovationLevel": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dislikes", "hardConstraints"],
+      "properties": {
+        "dislikes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 24,
+          "items": { "type": "string", "minLength": 2, "maxLength": 96 }
+        },
+        "hardConstraints": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 24,
+          "items": { "type": "string", "minLength": 2, "maxLength": 96 }
+        }
+      }
+    },
+
+    "signalsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetsAnalyzed", "textSignals", "topStyleScores", "confidenceReason"],
+      "properties": {
+        "assetsAnalyzed": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "textSignals": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "topStyleScores": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "score"],
+            "properties": {
+              "key": { "type": "string", "minLength": 2, "maxLength": 64 },
+              "score": { "type": "number" }
+            }
+          }
+        },
+        "confidenceReason": { "type": "string", "minLength": 3, "maxLength": 512 }
+      }
+    },
+
+    "userEdits": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "path", "from", "to", "reason"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "path": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "from": {},
+          "to": {},
+          "reason": { "type": "string", "minLength": 0, "maxLength": 256 }
+        }
+      }
+    }
+  }
+}

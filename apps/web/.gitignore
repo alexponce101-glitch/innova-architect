@@ -34,3 +34,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# downloads / debug artifacts
+_dl_*.json
+manifest.json
+output.json
+build.log
+
+# local data caches
+apps/web/.data/
+data/
+

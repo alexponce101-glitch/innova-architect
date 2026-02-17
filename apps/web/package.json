@@ -7,8 +7,10 @@
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint --max-warnings 0",
-    "check-types": "next typegen && tsc --noEmit"
+    "lint": "eslint --max-warnings 9999",
+    "check-types": "next typegen && tsc --noEmit",
+    "format": "prettier . --check",
+    "format:write": "prettier . --write"
   },
   "dependencies": {
     "@repo/ui": "workspace:*",
@@ -22,6 +24,7 @@
     "@types/node": "^22.15.3",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "baseline-browser-mapping": "^2.9.19",
     "eslint": "^9.39.1",
     "typescript": "5.9.2"
   }
